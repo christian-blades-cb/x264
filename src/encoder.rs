@@ -1,6 +1,6 @@
-use {Data, Encoding, Error, Image, Picture, Result, Setup};
 use core::{mem, ptr};
 use x264::*;
+use {Data, Encoding, Error, Image, Picture, Result, Setup};
 
 /// Encodes video.
 pub struct Encoder {
@@ -18,7 +18,7 @@ impl Encoder {
 
     #[doc(hidden)]
     pub unsafe fn from_raw(raw: *mut x264_t) -> Self {
-        let mut params = mem::uninitialized();
+        let mut params = mem::MaybeUninit::uninit().assume_init();
         x264_encoder_parameters(raw, &mut params);
         Self { raw, params }
     }
@@ -29,9 +29,7 @@ impl Encoder {
     ///
     /// Panics if there is a mismatch between the image and the encoder
     /// regarding width, height or colorspace.
-    pub fn encode(&mut self, pts: i64, image: Image)
-        -> Result<(Data, Picture)>
-    {
+    pub fn encode(&mut self, pts: i64, image: Image) -> Result<(Data, Picture)> {
         assert_eq!(image.width(), self.width());
         assert_eq!(image.height(), self.height());
         assert_eq!(image.encoding(), self.encoding());
@@ -44,27 +42,19 @@ impl Encoder {
     ///
     /// The caller must ensure that the width, height *and* colorspace
     /// of the image are the same as that of the encoder.
-    pub unsafe fn encode_unchecked(&mut self, pts: i64, image: Image)
-        -> Result<(Data, Picture)>
-    {
+    pub unsafe fn encode_unchecked(&mut self, pts: i64, image: Image) -> Result<(Data, Picture)> {
         let image = image.raw();
 
-        let mut picture = mem::uninitialized();
+        let mut picture = mem::MaybeUninit::uninit().assume_init();
         x264_picture_init(&mut picture);
         picture.i_pts = pts;
         picture.img = image;
 
         let mut len = 0;
-        let mut stuff = mem::uninitialized();
-        let mut raw = mem::uninitialized();
+        let mut stuff = mem::MaybeUninit::uninit().assume_init();
+        let mut raw = mem::MaybeUninit::uninit().assume_init();
 
-        let err = x264_encoder_encode(
-            self.raw,
-            &mut stuff,
-            &mut len,
-            &mut picture,
-            &mut raw
-        );
+        let err = x264_encoder_encode(self.raw, &mut stuff, &mut len, &mut picture, &mut raw);
 
         if err < 0 {
             Err(Error)
@@ -78,15 +68,9 @@ impl Encoder {
     /// Gets the video headers, which should be sent first.
     pub fn headers(&mut self) -> Result<Data> {
         let mut len = 0;
-        let mut stuff = unsafe { mem::uninitialized() };
+        let mut stuff = unsafe { mem::MaybeUninit::uninit().assume_init() };
 
-        let err = unsafe {
-            x264_encoder_headers(
-                self.raw,
-                &mut stuff,
-                &mut len
-            )
-        };
+        let err = unsafe { x264_encoder_headers(self.raw, &mut stuff, &mut len) };
 
         if err < 0 {
             Err(Error)
@@ -114,9 +98,13 @@ impl Encoder {
     }
 
     /// The width required of any input images.
-    pub fn width(&self) -> i32 { self.params.i_width }
+    pub fn width(&self) -> i32 {
+        self.params.i_width
+    }
     /// The height required of any input images.
-    pub fn height(&self) -> i32 { self.params.i_height }
+    pub fn height(&self) -> i32 {
+        self.params.i_height
+    }
     /// The encoding required of any input images.
     pub fn encoding(&self) -> Encoding {
         unsafe { Encoding::from_raw(self.params.i_csp) }
@@ -125,7 +113,9 @@ impl Encoder {
 
 impl Drop for Encoder {
     fn drop(&mut self) {
-        unsafe { x264_encoder_close(self.raw); }
+        unsafe {
+            x264_encoder_close(self.raw);
+        }
     }
 }
 
@@ -144,26 +134,21 @@ impl Flush {
         }
 
         let mut len = 0;
-        let mut stuff = unsafe { mem::uninitialized() };
-        let mut raw = unsafe { mem::uninitialized() };
+        let mut stuff = unsafe { mem::MaybeUninit::uninit().assume_init() };
+        let mut raw = unsafe { mem::MaybeUninit::uninit().assume_init() };
 
-        let err = unsafe {
-            x264_encoder_encode(
-                enc,
-                &mut stuff,
-                &mut len,
-                ptr::null_mut(),
-                &mut raw
-            )
-        };
+        let err =
+            unsafe { x264_encoder_encode(enc, &mut stuff, &mut len, ptr::null_mut(), &mut raw) };
 
         Some(if err < 0 {
             Err(Error)
         } else {
-            Ok(unsafe {(
-                Data::from_raw_parts(stuff, len as usize),
-                Picture::from_raw(raw),
-            )})
+            Ok(unsafe {
+                (
+                    Data::from_raw_parts(stuff, len as usize),
+                    Picture::from_raw(raw),
+                )
+            })
         })
     }
 }
